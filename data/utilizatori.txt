@@ -1,0 +1,7 @@
+1;Ana;Pop
+2;Mihai;Ionescu
+3;Ioana;Rus
+4;Andrei;Matei
+5;Elena;Dobre
+6;Radu;Stan
+7;Maria;Lupu
