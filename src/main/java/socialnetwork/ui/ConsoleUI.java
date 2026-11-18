@@ -19,7 +19,8 @@ import java.util.stream.Collectors;
  * <p>
  * It reads numbered commands from the keyboard and calls the methods of
  * {@link Service}. The exceptions of the application are handled here: their
- * message is shown to the user and the program goes on. The search commands
+ * message is shown to the user, without a stack trace, and the program goes on
+ * (for example when the database server is stopped). The search commands
  * build their criteria from {@link CriteriiUtilizator} and lambda expressions.
  */
 public class ConsoleUI {
@@ -80,7 +81,7 @@ public class ConsoleUI {
             } catch (ServiceException e) {
                 System.out.println("Eroare: " + e.getMessage());
             } catch (RepositoryException e) {
-                System.out.println("Eroare la salvarea datelor: " + e.getMessage());
+                System.out.println(e.getMessage());
             } catch (NumberFormatException e) {
                 System.out.println("Eroare: ID-ul trebuie sa fie un numar.");
             }
@@ -175,11 +176,12 @@ public class ConsoleUI {
     }
 
     /**
-     * Reads the first and last name, adds the user and shows it.
+     * Reads the first and last name, adds the user and shows it, together with
+     * the id received from the storage (for {@code DATABASE}, from the database).
      */
     private void addUser() {
         Utilizator u = service.addUser(read("Prenume: "), read("Nume: "));
-        System.out.println("Adaugat: " + u);
+        System.out.println("Adaugat, cu id-ul primit de la stocare " + u.getId() + ": " + u);
     }
 
     /**

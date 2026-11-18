@@ -1,6 +1,8 @@
 package socialnetwork.repository;
+
 /**
  * The kinds of persistence the application can use.
+ * <p>
  * The kind is chosen with the {@code repository.type} property of the
  * configuration file and is used by {@link RepositoryFactory}.
  */
@@ -9,6 +11,6 @@ public enum RepositoryType {
     MEMORY,
     /** The data is kept in text files. */
     FILE,
-    /** The data is kept in a database (implemented in laboratory 5). */
+    /** The data is kept in a PostgreSQL database, with JDBC. */
     DATABASE
 }

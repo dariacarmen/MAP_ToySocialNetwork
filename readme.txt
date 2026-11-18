@@ -1,156 +1,166 @@
-  RETEA DE SOCIALIZARE - LABORATOR 4 (refactorizare in stil Java 8)
+=====================================================================
+  RETEA DE SOCIALIZARE - LABORATOR 5 (persistenta in baza de date)
   Metode Avansate de Programare, 2026-2027
+=====================================================================
 
-Rulare: clasa socialnetwork.Main, cu working directory = folderul
-proiectului (caile din config.properties si data/ sunt relative la el).
+Proiectul continua laboratorul 4. Ce se schimba: datele se pastreaza intr-o
+baza de date PostgreSQL (repository.type=DATABASE), iar id-ul unui utilizator
+nou il genereaza stocarea, nu service-ul. Functionalitatile din laboratorul 2
+merg in continuare; la adaugarea unui utilizator se afiseaza id-ul primit de
+la baza de date.
 
-Aplicatia face exact ce facea la laboratorul 3, pe aceleasi fisiere de
-date: fisierul lipsa, liniile corupte (raportate cu numarul liniei) si
-exceptiile se trateaza la fel. Codul a fost rescris cu lambda, referinte
-la metode, stream-uri si Optional.
 
-1. BUCLE INLOCUITE - TABEL INAINTE / DUPA
+=====================================================================
+1. PREGATIRE SI RULARE
+=====================================================================
+ 1. PostgreSQL pornit local, portul 5432, utilizatorul postgres.
+ 2. In pgAdmin: Databases -> Create -> Database..., numele socialnetwork.
+ 3. Pe baza de date socialnetwork: Tools -> Query Tool, se deschide
+    sql/socialnetwork.sql si se ruleaza (F5). Scriptul poate fi rulat de mai
+    multe ori: nu recreeaza tabelele si nu dubleaza datele de test.
+ 4. Se copiaza src/main/resources/config.example.properties in
+    config.properties (acelasi folder) si se completeaza db.password.
+    config.properties este in .gitignore: parola reala nu ajunge pe GitHub.
+ 5. Proiectul este proiect Gradle; driverul JDBC
+    org.postgresql:postgresql:42.7.7 este declarat in build.gradle.kts.
+    Se ruleaza clasa socialnetwork.Main, cu working directory = folderul
+    proiectului.
 
- Clasa / metoda                     | Inainte (lab 3)               | Dupa (lab 4) - operatii de stream
-------------------------------------+-------------------------------+--------------------------------------------
- Service.rebuildFriendLists         | for peste utilizatori +       | stream().forEach; collect(partitioningBy)
-                                    | for peste prietenii + if      | pe prietenii valide / invalide; map + forEach
- Service.nextUserId                 | for + Math.max                | map(Utilizator::getId), max, Optional.map,
-                                    |                               | orElse
- Service.removeUser                 | for + if + lista exterioara;  | map, filter, collect(toList);
-                                    | for pentru stergere           | forEach(friendshipRepo::delete)
- Service.getCommunities             | for peste utilizatori + DFS   | sorted, map(this::componentOf), distinct,
-                                    | cu for peste prieteni         | collect(toList); DFS cu filter + forEach
- Service.getNumberOfCommunities     | getCommunities().size()       | map(this::componentOf), distinct, count
- Service.getMostSociableCommunity   | for + comparatie manuala      | max(Comparator.comparingInt(...)) ->
-                                    | cu bestLength                 | Optional.orElseThrow; sorted + collect
- Service.longestPath / longestFrom  | for + backtracking cu         | map + reduce(0, Integer::max);
-                                    | onPath.add / onPath.remove    | filter + mapToInt + max().orElse(0)
- Service.getFriendsOf (nou)         | -                             | map, filter, flatMap, distinct, map,
-                                    |                               | sorted(comparing.thenComparing), collect
- AbstractFileRepository.loadData    | BufferedReader + while        | Files.lines in try-with-resources,
-                                    | (readLine) + contor de linii  | collect(toList); IntStream.range + filter
-                                    |                               | + forEach (numarul liniei = i + 1)
- AbstractFileRepository.writeToFile | BufferedWriter + for          | stream().map(this::createEntityAsString)
-                                    |                               | .collect(toList()); Files.write(path, linii)
- ConsoleUI (afisari)                | for peste liste               | forEach(System.out::println);
-                                    |                               | map + collect(joining(", "))
+Trecerea intre DATABASE, FILE si MEMORY se face doar din config.properties
+(repository.type), fara modificari in cod.
 
-Pipeline de stream (exemplu din Service.getFriendsOf):
-  friendshipRepo.stream()          -> sursa
-  .map / .filter / .flatMap        -> operatii intermediare (lenese,
-  .distinct / .sorted                 intorc tot un Stream)
-  .collect(Collectors.toList())    -> operatie terminala (porneste
-                                      prelucrarea si produce rezultatul)
 
-2. INTERFETE FUNCTIONALE FOLOSITE SI UNDE
+=====================================================================
+2. BAZA DE DATE (sql/socialnetwork.sql)
+=====================================================================
+ users(id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+       first_name VARCHAR NOT NULL, last_name VARCHAR NOT NULL)
+ friendships(id1 BIGINT, id2 BIGINT, friends_from TIMESTAMP NOT NULL,
+             PRIMARY KEY (id1, id2), CHECK (id1 < id2))
+ id1 si id2 sunt chei straine catre users(id).
 
- Interfata                          | Unde
-------------------------------------+--------------------------------------------------
- Validator<T> (@FunctionalInterface)| domain.validators.Validator; metoda default andThen.
-                                    | In Main, regula noua "doar litere" este o lambda
-                                    | compusa cu UtilizatorValidator prin andThen,
-                                    | fara clasa noua si fara a modifica UtilizatorValidator.
- Predicate<E>                       | Repository.findAll(Predicate<E>) (metoda default);
-                                    | criteriile din domain.CriteriiUtilizator; combinate
-                                    | in ConsoleUI cu or, and, negate, Predicate.not.
- Function<T, R>                     | RepositoryFactory: Map<RepositoryType,
-                                    | Function<Validator<E>, Repository<ID, E>>>
-                                    | (inlocuieste switch-ul); map(...) in stream-uri.
- Comparator<T>                      | Service (BY_ID, sortarea prieteniilor si a prietenilor),
-                                    | ConsoleUI (comanda 12): Comparator.comparing,
-                                    | comparingInt, thenComparing, reversed.
- Supplier<T>                        | orElseThrow(() -> new ServiceException(...)) si
-                                    | orElseThrow(() -> new RepositoryException(...)).
- Consumer<T>                        | forEach(System.out::println), forEach(this::link).
- BinaryOperator<T>                  | reduce(0, Integer::max) in Service.longestPath.
- IntPredicate                       | chars().allMatch(Character::isLetter) in regula din Main.
+ - GENERATED ALWAYS: baza de date genereaza id-ul la fiecare INSERT si
+   refuza un id dat explicit ("cannot insert a non-DEFAULT value").
+ - CHECK (id1 < id2): o prietenie se salveaza o singura data; Prietenie.makeId
+   pune deja id-ul mai mic primul.
 
-Referintele la metode (toate cele patru tipuri):
- - metoda statica:                    CriteriiUtilizator::faraPrieteni,
-                                      Character::isLetter, Integer::max
- - metoda de instanta a unui obiect:  System.out::println, friendshipRepo::delete,
-                                      userRepo::findOne, this::componentOf
- - metoda de instanta a unui obiect
-   oarecare:                          Utilizator::getId, Utilizator::getLastName,
-                                      Prietenie::getId, String::trim
- - constructor:                       InMemoryRepository::new (in RepositoryFactory)
+ALEGERE: ON DELETE CASCADE sau stergere explicita in service?
+-------------------------------------------------------------
+Am ales stergerea explicita in service (Service.removeUser), iar cheile
+straine NU au ON DELETE CASCADE. Motive:
+ - regula "un utilizator sters nu mai are prietenii" sta intr-un singur loc
+   si merge la fel pentru MEMORY, FILE si DATABASE (fisierele si memoria nu
+   au cascade); cu CASCADE, aceeasi regula ar fi fost scrisa de doua ori;
+ - cheile straine fara CASCADE raman o protectie: daca cineva sterge direct
+   un utilizator care mai are prietenii (de exemplu din pgAdmin), baza de date
+   refuza ("violates foreign key constraint") in loc sa stearga in tacere si
+   prieteniile.
+Dezavantaj: prieteniile si utilizatorul se sterg prin conexiuni separate,
+nu intr-o singura tranzactie.
 
-3. ALEGERI DE PROIECTARE
 
-Optional in interfata Repository
+=====================================================================
+3. REPOSITORY-URILE JDBC (pachetul repository.database)
+=====================================================================
+ UtilizatorDbRepository implements Repository<Long, Utilizator>
+ PrietenieDbRepository  implements Repository<Tuple<Long, Long>, Prietenie>
 
-Repository intoarce in continuare null (findOne, save, delete, update),
-ca la laboratorul 3. Motive:
- - contractul din Javadoc ramane acelasi, deci InMemoryRepository,
-   repository-urile pe fisier si scheletele pentru baza de date nu se
-   schimba;
- - Optional este folosit acolo unde este consumat rezultatul: in Service,
-   findUser(id) intoarce Optional.ofNullable(userRepo.findOne(id)), iar
-   getUser(id) foloseste orElseThrow. Optional mai apare la max (cea mai
-   sociabila comunitate, id-ul urmator) si in RepositoryFactory.
- - get() nu este apelat nicaieri; valoarea se extrage cu orElseThrow,
-   orElse, map, isPresent.
+ - Conexiunea: DriverManager.getConnection(url, user, password); url, user
+   si password vin din config.properties prin RepositoryFactory, care ii da
+   repository-ului prin constructor.
+ - Fiecare metoda deschide Connection, PreparedStatement si ResultSet in
+   try-with-resources (se inchid automat, si la exceptii).
+ - Toate interogarile folosesc PreparedStatement cu "?"; valorile se trimit
+   cu setString / setLong / setObject si nu se concateneaza in textul SQL.
+   De aceea un nume ca  Robert'); DROP TABLE users; --  se salveaza ca text
+   obisnuit (SQL injection nu este posibil).
+ - Id-ul generat: save face INSERT fara id, cu
+   prepareStatement(sql, Statement.RETURN_GENERATED_KEYS), citeste id-ul cu
+   getGeneratedKeys() si il seteaza pe utilizator (setId).
 
-Template Method vs Function in repository-urile pe fisier
+Contractul Repository (acelasi ca la laboratoarele 3-4, intoarce null):
+ - findOne(id): entitatea sau null; id null -> IllegalArgumentException;
+ - save: validare inainte; null daca s-a salvat; pentru o prietenie care
+   exista deja (cheie primara duplicata, SQLState 23505) intoarce entitatea;
+ - update: validare inainte; daca executeUpdate() intoarce 0 (id inexistent)
+   intoarce entitatea, altfel null;
+ - delete: intoarce entitatea stearsa (DELETE ... RETURNING) sau null;
+ - argument null -> IllegalArgumentException.
 
-Am pastrat Template Method (AbstractFileRepository cu subclasele
-UtilizatorFileRepository si PrietenieFileRepository). Motive:
- - conversia linie <-> entitate este legata de tipul entitatii si sta
-   impreuna cu formatul ei (constantele FIELDS, FILE_DATE_FORMAT);
- - factory-ul ramane simplu: creeaza un repository dupa nume, fara sa
-   primeasca doua functii de conversie;
- - codul de citire si scriere (Files.lines, Files.write) este scris o
-   singura data, in clasa abstracta.
-Dezavantaj cunoscut: loadData este apelata din constructor si apeleaza
-metode suprascrise. De aceea subclasele folosesc doar constante statice
-(Effective Java, Item 19). Varianta cu Function<String, E> si
-Function<E, String> ar evita aceasta problema (compozitie in loc de
-mostenire).
+Utilizatorii cititi din baza de date vin cu lista de prieteni completata
+(findAll citeste users si friendships cu aceeasi conexiune). Motiv: service-ul
+(comunitati, cel mai lung drum) si criteriile din CriteriiUtilizator folosesc
+getFriends(), deci merg la fel pentru toate tipurile de persistenta.
 
-Factory fara switch
 
-RepositoryFactory tine doua Map-uri, cate unul pentru utilizatori si
-prietenii, din RepositoryType in Function<Validator<E>, Repository<ID, E>>.
-Functiile sunt lambda-uri, deci repository-ul este creat doar pentru tipul
-ales. Pentru DATABASE, repository-urile raman schelete care arunca
-UnsupportedOperationException (implementarea este la laboratorul 5).
+=====================================================================
+4. ID-UL GENERAT DE STOCARE, PENTRU TOATE TIPURILE
+=====================================================================
+Service.addUser creeaza utilizatorul fara id si apeleaza save; nu mai exista
+Service.nextUserId (era in laboratorul 4).
+ - DATABASE: GENERATED ALWAYS AS IDENTITY + getGeneratedKeys();
+ - MEMORY si FILE: InMemoryRepository primeste in constructor un generator de
+   id-uri, Function<Collection<E>, ID>; pentru utilizatori este
+   InMemoryRepository::nextLongId (cel mai mare id + 1). Prieteniile au mereu
+   id (perechea de id-uri), deci nu au generator.
+ - UtilizatorValidator accepta acum un utilizator nou fara id; daca id-ul
+   exista, trebuie sa fie pozitiv.
 
-4. BUCLE PASTRATE SI DE CE
 
- - ConsoleUI.run: bucla while (true) care citeste comenzi de la tastatura.
-   Nu parcurge o colectie (repeta citirea pana la comanda 0), deci nu
-   intra in restrictia despre bucle pe colectii.
- - Backtracking-ul pentru cel mai lung drum NU a fost pastrat ca bucla:
-   este scris cu stream-uri (filter + mapToInt + max). Fiecare apel lucreaza
-   pe propria copie a drumului, deci functiile date stream-ului nu au
-   efecte secundare.
+=====================================================================
+5. FACTORY SI CONFIGURARE
+=====================================================================
+ - RepositoryFactory (Map<RepositoryType, Function<...>>, fara switch) creeaza
+   pentru DATABASE repository-urile JDBC, cu db.url, db.user, db.password.
+ - config.example.properties (pe GitHub, fara parola reala) si
+   config.properties (local, in .gitignore).
+ - Driverul: implementation("org.postgresql:postgresql:42.7.7") in
+   build.gradle.kts.
 
-5. EXCEPTII SI COMPORTAMENT NESCHIMBAT
 
- - Fisier lipsa: repository-ul porneste gol, fisierul (si folderul data/)
-   se creeaza la prima salvare.
- - Linie corupta: incarcarea se opreste cu un mesaj cu fisierul, numarul
-   liniei, continutul ei si motivul (RepositoryException, cu exceptia
-   originala drept cauza). Liniile sunt citite intr-o lista cu Files.lines,
-   apoi parcurse cu IntStream.range, ca sa fie cunoscut numarul liniei.
- - IOException de la Files.lines si Files.write este impachetata in
-   RepositoryException (exception chaining). Nu exista exceptii checked
-   aruncate din interiorul unei lambda.
- - Exceptiile se prind in ConsoleUI si, la pornire, in Main.
- - Fisiere de test cu linii corupte: data/utilizatori_corupt.txt si
-   data/prietenii_corupt.txt (se folosesc schimband file.utilizatori sau
-   file.prietenii in config.properties).
+=====================================================================
+6. TRATAREA EXCEPTIILOR
+=====================================================================
+SQLException se impacheteaza in RepositoryException (cu SQLException drept
+cauza), in DbErrors.wrap. Mesajul se alege dupa SQLState:
+ 08xxx  -> baza de date nu este disponibila (server oprit / url gresit)
+ 28P01  -> autentificare esuata (parola sau utilizator gresit)
+ 3D000  -> baza de date nu exista
+ 42P01  -> tabela nu exista (scriptul nu a fost rulat)
+ 23505  -> cheie duplicata (la prietenii: save intoarce entitatea, iar UI
+           afiseaza "Utilizatorii x si y sunt deja prieteni")
+ 23503  -> cheie straina incalcata
+ 23514  -> constrangere CHECK incalcata
+In UI (ConsoleUI) si la pornire (Main) se afiseaza doar mesajul, fara stack
+trace; nu exista catch gol si nici catch (Exception e). Daca serverul se
+opreste in timpul rularii, aplicatia afiseaza mesajul si continua.
 
-6. FUNCTIONALITATI DE CAUTARE (DEMONSTRATIE)
 
- 9  - prietenii unui utilizator (stream cu flatMap, joining)
- 10 - cautare dupa nume sau prenume: numeIncepeCu(t).or(prenumeIncepeCu(t))
- 11 - utilizatori fara prieteni: CriteriiUtilizator::faraPrieteni
- 12 - cel putin N prieteni: Predicate.not(CriteriiUtilizator::faraPrieteni)
-      .and(celPutinPrieteni(n)), sortati cu comparingInt(...).reversed()
-      .thenComparing(Utilizator::getLastName)
- 13 - nume care NU incepe cu un text: numeIncepeCu(t).negate()
+=====================================================================
+7. ALTE ALEGERI
+=====================================================================
+ - Bucle pastrate: while (rs.next()) in repository-urile JDBC parcurge
+   cursorul unui ResultSet (nu o colectie Java), ca in Seminarul 7; while
+   (true) din ConsoleUI citeste comenzi de la tastatura.
+ - Regula scrisa ca lambda in Main (compusa cu UtilizatorValidator prin
+   andThen) este acum "numele au cel mult 50 de caractere". Regula din
+   laboratorul 4 ("doar litere") ar fi respins numele cu '); DROP TABLE
+   users; -- cerut la demonstratie.
+ - Data unei prietenii noi se salveaza fara fractiuni de secunda.
 
-Un criteriu nou de cautare sau o regula noua de validare se adauga doar
-printr-o lambda, fara clase noi (exemplu: regula "doar litere" din Main).
+
+=====================================================================
+8. DEMONSTRATIE
+=====================================================================
+ - CRUD verificat in pgAdmin: dupa comenzile 1-4, in pgAdmin pe tabela users
+   sau friendships: click dreapta -> View/Edit Data -> All Rows.
+ - Id generat: comanda 1 afiseaza "Adaugat, cu id-ul primit de la stocare N".
+ - Date pastrate dupa repornire: se inchide aplicatia (0), se porneste din
+   nou, comanda 5.
+ - Schimbarea lui repository.type: DATABASE / FILE / MEMORY in
+   config.properties.
+ - Server oprit: in Windows, Services -> postgresql-x64-17 -> Stop; aplicatia
+   afiseaza "baza de date nu este disponibila"; apoi Start.
+ - Nume cu '); DROP TABLE users; -- : comanda 1, prenume
+   Robert'); DROP TABLE users; --  si nume Tables; tabela users exista in
+   continuare, iar numele apare ca text in comanda 5 si in pgAdmin.

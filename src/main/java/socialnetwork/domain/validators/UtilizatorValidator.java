@@ -7,7 +7,8 @@ import socialnetwork.domain.Utilizator;
  * <p>
  * A user is valid if:
  * <ul>
- *     <li>the id is not null and positive;</li>
+ *     <li>the id may be missing (a new user receives its id from the storage),
+ *     but, if it exists, it is positive;</li>
  *     <li>the first name is not empty and starts with an upper case letter;</li>
  *     <li>the last name is not empty and starts with an upper case letter.</li>
  * </ul>
@@ -23,6 +24,7 @@ public class UtilizatorValidator implements Validator<Utilizator> {
 
     /**
      * Validates a user.
+     *
      * @param u the user to validate
      * @throws ValidationException if the user is not valid; the message
      *                             contains all the errors found
@@ -30,8 +32,8 @@ public class UtilizatorValidator implements Validator<Utilizator> {
     @Override
     public void validate(Utilizator u) {
         String errors = "";
-        if (u.getId() == null || u.getId() <= 0) {
-            errors += "Id-ul trebuie sa fie nenul si pozitiv. ";
+        if (u.getId() != null && u.getId() <= 0) {
+            errors += "Id-ul trebuie sa fie pozitiv. ";
         }
         if (u.getFirstName() == null || u.getFirstName().isEmpty()
                 || !Character.isUpperCase(u.getFirstName().charAt(0))) {

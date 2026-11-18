@@ -22,9 +22,20 @@ import java.util.function.Function;
 
 /**
  * Creates the repositories of the application (Simple Factory pattern).
+ * <p>
+ * It is the only place in the application that knows the concrete repository
+ * classes. The kind of persistence ({@link RepositoryType}) and its parameters
+ * are read from a configuration file, so they are not written in the code.
+ * Both repositories are created for the same kind of persistence.
+ * <p>
  * There is no {@code switch}: every {@link RepositoryType} is mapped, in a
  * {@link Map}, to a {@link Function} that receives the validator and creates
  * the repository. Only the function of the chosen type is called.
+ * <p>
+ * For users, every kind of persistence generates the id of a new user: the
+ * database with {@code GENERATED ALWAYS AS IDENTITY}, the memory and file
+ * repositories with {@link InMemoryRepository#nextLongId}. The connection
+ * parameters of the database are passed to the database repositories here.
  * <p>
  * Properties used:
  * <ul>
@@ -51,6 +62,7 @@ public class RepositoryFactory {
 
     /**
      * Creates a factory that reads its settings from the given configuration file.
+     *
      * @param configFile the path of the configuration file
      * @throws RepositoryException if the file cannot be read, or if
      *                             {@code repository.type} is missing or unknown
@@ -60,7 +72,8 @@ public class RepositoryFactory {
         this.properties = loadProperties(configFile);
         this.type = readType();
         this.userCreators = Map.of(
-                RepositoryType.MEMORY, InMemoryRepository::new,
+                RepositoryType.MEMORY, validator -> new InMemoryRepository<>(validator,
+                        InMemoryRepository::nextLongId),
                 RepositoryType.FILE, validator -> new UtilizatorFileRepository(validator,
                         getRequired("file.utilizatori")),
                 RepositoryType.DATABASE, validator -> new UtilizatorDbRepository(validator,
@@ -72,8 +85,10 @@ public class RepositoryFactory {
                 RepositoryType.DATABASE, validator -> new PrietenieDbRepository(validator,
                         getRequired("db.url"), getRequired("db.user"), getPresent("db.password")));
     }
+
     /**
      * Reads the configuration file into a {@link Properties} object.
+     *
      * @param configFile the path of the configuration file
      * @return the properties read from the file
      * @throws RepositoryException if the file cannot be read
@@ -83,12 +98,15 @@ public class RepositoryFactory {
         try (BufferedReader reader = new BufferedReader(new FileReader(configFile, StandardCharsets.UTF_8))) {
             result.load(reader);
         } catch (IOException e) {
-            throw new RepositoryException("Nu pot citi fisierul de configurare " + configFile, e);
+            throw new RepositoryException("Nu pot citi fisierul de configurare " + configFile
+                    + " (copiati config.example.properties in config.properties si completati parola)", e);
         }
         return result;
     }
+
     /**
      * Returns the value of a property that must exist and must not be empty.
+     *
      * @param key the name of the property
      * @return the value of the property, without spaces at the ends
      * @throws RepositoryException if the property is missing or empty
@@ -99,9 +117,11 @@ public class RepositoryFactory {
                 .filter(value -> !value.isEmpty())
                 .orElseThrow(() -> missing(key));
     }
+
     /**
      * Returns the value of a property that must exist, but may be empty
      * (for example a database password).
+     *
      * @param key the name of the property
      * @return the value of the property, without spaces at the ends
      * @throws RepositoryException if the property is missing
@@ -111,8 +131,10 @@ public class RepositoryFactory {
                 .map(String::trim)
                 .orElseThrow(() -> missing(key));
     }
+
     /**
      * Builds the exception for a missing property.
+     *
      * @param key the name of the missing property
      * @return the exception to throw
      */
@@ -120,8 +142,10 @@ public class RepositoryFactory {
         return new RepositoryException("Lipseste proprietatea '" + key
                 + "' din fisierul de configurare " + configFile);
     }
+
     /**
      * Reads and checks the {@code repository.type} property.
+     *
      * @return the kind of persistence
      * @throws RepositoryException if the property is missing or has an unknown value
      */
@@ -134,15 +158,19 @@ public class RepositoryFactory {
                     + "'. Valori permise: MEMORY, FILE, DATABASE", e);
         }
     }
+
     /**
      * Returns the kind of persistence read from the configuration file.
+     *
      * @return the kind of persistence used by this factory
      */
     public RepositoryType getType() {
         return type;
     }
+
     /**
      * Creates the repository of users for the configured kind of persistence.
+     *
      * @param validator the validation strategy for users
      * @return the repository of users, seen through the {@link Repository} interface
      * @throws RepositoryException if a needed property is missing, or if the
@@ -153,8 +181,10 @@ public class RepositoryFactory {
                 .orElseThrow(() -> new RepositoryException("Tip de persistenta nesuportat: " + type))
                 .apply(validator);
     }
+
     /**
      * Creates the repository of friendships for the configured kind of persistence.
+     *
      * @param validator the validation strategy for friendships
      * @return the repository of friendships, seen through the {@link Repository} interface
      * @throws RepositoryException if a needed property is missing, or if the

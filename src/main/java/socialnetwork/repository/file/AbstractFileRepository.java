@@ -11,7 +11,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.format.DateTimeParseException;
+import java.util.Collection;
 import java.util.List;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -53,7 +55,25 @@ public abstract class AbstractFileRepository<ID, E extends Entity<ID>> extends I
      *                                  or contains a corrupted or invalid line
      */
     public AbstractFileRepository(Validator<E> validator, String fileName) {
-        super(validator);
+        this(validator, fileName, null);
+    }
+
+    /**
+     * Creates the repository, with an id generator for the new entities, and
+     * loads the entities from the file.
+     *
+     * @param validator   the validation strategy for the entities
+     * @param fileName    the path of the text file
+     * @param idGenerator receives the entities already saved and returns the id
+     *                    for a new entity; {@code null} if the entities must
+     *                    always be saved with an id
+     * @throws IllegalArgumentException if {@code fileName} is {@code null} or empty
+     * @throws RepositoryException      if the file exists but cannot be read,
+     *                                  or contains a corrupted or invalid line
+     */
+    public AbstractFileRepository(Validator<E> validator, String fileName,
+                                  Function<Collection<E>, ID> idGenerator) {
+        super(validator, idGenerator);
         if (fileName == null || fileName.isBlank()) {
             throw new IllegalArgumentException("fileName must be not empty");
         }
@@ -181,6 +201,7 @@ public abstract class AbstractFileRepository<ID, E extends Entity<ID>> extends I
 
     /**
      * Removes the entity with the given identifier, then rewrites the file.
+     *
      * @param id the identifier of the entity to remove; must not be {@code null}
      * @return the removed entity, or {@code null} if it does not exist
      * @throws IllegalArgumentException if {@code id} is {@code null}
@@ -195,6 +216,7 @@ public abstract class AbstractFileRepository<ID, E extends Entity<ID>> extends I
 
     /**
      * Updates an existing entity, then rewrites the file.
+     *
      * @param entity the new entity; must not be {@code null}
      * @return {@code null} if the entity was updated, otherwise the given entity
      *         (there is no entity with this id)
