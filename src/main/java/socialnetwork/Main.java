@@ -62,7 +62,7 @@ public class Main {
             Repository<Tuple<Long, Long>, Prietenie> friendshipRepo =
                     factory.createPrietenieRepository(new PrietenieValidator());
             Service service = new Service(userRepo, friendshipRepo);
-            new ConsoleUI(service).run();
+            new ConsoleUI(service, factory.getPageSize()).run();
         } catch (RepositoryException e) {
             System.out.println("Aplicatia nu poate porni. " + e.getMessage());
         }

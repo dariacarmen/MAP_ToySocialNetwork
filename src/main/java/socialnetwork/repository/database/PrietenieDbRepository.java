@@ -2,10 +2,13 @@ package socialnetwork.repository.database;
 
 import socialnetwork.domain.Prietenie;
 import socialnetwork.domain.Tuple;
+import socialnetwork.domain.Utilizator;
 import socialnetwork.domain.validators.ValidationException;
 import socialnetwork.domain.validators.Validator;
 import socialnetwork.exceptions.RepositoryException;
-import socialnetwork.repository.Repository;
+import socialnetwork.repository.FriendshipPagingRepository;
+import socialnetwork.util.paging.Page;
+import socialnetwork.util.paging.Pageable;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -25,8 +28,12 @@ import java.util.List;
  * {@link Connection}, {@link PreparedStatement} and {@link ResultSet} in
  * try-with-resources, and the values are always sent as parameters ({@code ?}).
  * A {@link SQLException} is converted into a {@link RepositoryException}.
+ * <p>
+ * {@link #findFriendsOnPage(Long, Pageable)} returns one page of the friends of
+ * a user with a single {@code SELECT} that joins {@code friendships} with
+ * {@code users}, paginated in SQL.
  */
-public class PrietenieDbRepository implements Repository<Tuple<Long, Long>, Prietenie> {
+public class PrietenieDbRepository implements FriendshipPagingRepository {
     /** Selects all the friendships, ordered by id. */
     private static final String SELECT_ALL = "SELECT id1, id2, friends_from FROM friendships ORDER BY id1, id2";
     /** Selects one friendship by id. */
@@ -38,6 +45,16 @@ public class PrietenieDbRepository implements Repository<Tuple<Long, Long>, Prie
     /** Deletes a friendship and returns the deleted row. */
     private static final String DELETE = "DELETE FROM friendships WHERE id1 = ? AND id2 = ? "
             + "RETURNING id1, id2, friends_from";
+
+    /**
+     * Selects one page of the friends of a user: the friend is the other user
+     * of every friendship of the user ({@code id1 = ? OR id2 = ?}).
+     */
+    private static final String SELECT_FRIENDS_PAGE = "SELECT u.id, u.first_name, u.last_name "
+            + "FROM friendships f JOIN users u ON u.id = CASE WHEN f.id1 = ? THEN f.id2 ELSE f.id1 END "
+            + "WHERE f.id1 = ? OR f.id2 = ? ORDER BY u.id LIMIT ? OFFSET ?";
+    /** Counts the friends of a user. */
+    private static final String COUNT_FRIENDS = "SELECT count(*) FROM friendships WHERE id1 = ? OR id2 = ?";
 
     /** The validation strategy for friendships. */
     private final Validator<Prietenie> validator;
@@ -141,6 +158,54 @@ public class PrietenieDbRepository implements Repository<Tuple<Long, Long>, Prie
             throw DbErrors.wrap("citirea prieteniilor", e);
         }
         return result;
+    }
+
+    /**
+     * Returns one page of the friends of a user, ordered by id. The friends are
+     * read with one {@code SELECT} with {@code JOIN users}, paginated in SQL
+     * ({@code LIMIT ? OFFSET ?}); the number of all the friends is read with
+     * {@code count(*)} on the same connection.
+     *
+     * @param userId   the id of the user; must not be {@code null}
+     * @param pageable which page and the size of a page; must not be {@code null}
+     * @return the friends on the page (without their own friend lists) and the
+     *         number of all the friends; a page after the last one has no elements
+     * @throws IllegalArgumentException if {@code userId} or {@code pageable} is {@code null}
+     * @throws RepositoryException      if the database cannot be read
+     */
+    @Override
+    public Page<Utilizator> findFriendsOnPage(Long userId, Pageable pageable) {
+        if (userId == null) throw new IllegalArgumentException("userId must be not null");
+        if (pageable == null) throw new IllegalArgumentException("pageable must be not null");
+        List<Utilizator> friends = new ArrayList<>();
+        try (Connection connection = connect()) {
+            try (PreparedStatement statement = connection.prepareStatement(SELECT_FRIENDS_PAGE)) {
+                statement.setLong(1, userId);
+                statement.setLong(2, userId);
+                statement.setLong(3, userId);
+                statement.setInt(4, pageable.getPageSize());
+                statement.setLong(5, pageable.getOffset());
+                try (ResultSet rs = statement.executeQuery()) {
+                    while (rs.next()) {
+                        Utilizator friend = new Utilizator(rs.getString("first_name"), rs.getString("last_name"));
+                        friend.setId(rs.getLong("id"));
+                        friends.add(friend);
+                    }
+                }
+            }
+            long total;
+            try (PreparedStatement statement = connection.prepareStatement(COUNT_FRIENDS)) {
+                statement.setLong(1, userId);
+                statement.setLong(2, userId);
+                try (ResultSet rs = statement.executeQuery()) {
+                    rs.next();
+                    total = rs.getLong(1);
+                }
+            }
+            return new Page<>(friends, total);
+        } catch (SQLException e) {
+            throw DbErrors.wrap("citirea prietenilor utilizatorului " + userId, e);
+        }
     }
 
     /**

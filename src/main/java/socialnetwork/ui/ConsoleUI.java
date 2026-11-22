@@ -7,10 +7,13 @@ import socialnetwork.domain.validators.ValidationException;
 import socialnetwork.exceptions.RepositoryException;
 import socialnetwork.exceptions.ServiceException;
 import socialnetwork.service.Service;
+import socialnetwork.util.paging.Page;
 
 import java.util.Comparator;
 import java.util.List;
 import java.util.Scanner;
+import java.util.function.Function;
+import java.util.function.IntFunction;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -22,20 +25,30 @@ import java.util.stream.Collectors;
  * message is shown to the user, without a stack trace, and the program goes on
  * (for example when the database server is stopped). The search commands
  * build their criteria from {@link CriteriiUtilizator} and lambda expressions.
+ * <p>
+ * When the persistence supports paging (database), the list of users and the
+ * list of friends of a user are shown page by page, with forward / back
+ * navigation and the text "Pagina x din y". The page size comes from the
+ * configuration file. The user interface contains no SQL: it asks the service
+ * for a page.
  */
 public class ConsoleUI {
     /** The service that contains the application logic. */
     private final Service service;
+    /** The number of elements on a page of a list. */
+    private final int pageSize;
     /** The reader for the keyboard input. */
     private final Scanner scanner = new Scanner(System.in);
 
     /**
      * Creates the user interface for the given service.
      *
-     * @param service the service of the application
+     * @param service  the service of the application
+     * @param pageSize the number of elements on a page of a list
      */
-    public ConsoleUI(Service service) {
+    public ConsoleUI(Service service, int pageSize) {
         this.service = service;
+        this.pageSize = pageSize;
     }
 
     /**
@@ -84,6 +97,8 @@ public class ConsoleUI {
                 System.out.println(e.getMessage());
             } catch (NumberFormatException e) {
                 System.out.println("Eroare: ID-ul trebuie sa fie un numar.");
+            } catch (IllegalArgumentException e) {
+                System.out.println("Date invalide: " + e.getMessage());
             }
         }
     }
@@ -108,7 +123,7 @@ public class ConsoleUI {
                 removeFriend();
                 break;
             case "5":
-                service.getAllUsers().forEach(System.out::println);
+                showUsers();
                 break;
             case "6":
                 service.getAllFriendships().forEach(System.out::println);
@@ -219,10 +234,113 @@ public class ConsoleUI {
     }
 
     /**
-     * Reads an id and shows the names of the friends of that user, on one line.
+     * Shows the users: page by page if the persistence supports paging,
+     * otherwise the whole list.
+     */
+    private void showUsers() {
+        if (service.supportsPaging()) {
+            browse("Utilizatori:", pageNumber -> service.getUsersOnPage(pageNumber, pageSize),
+                    Utilizator::toString);
+        } else {
+            service.getAllUsers().forEach(System.out::println);
+        }
+    }
+
+    /**
+     * Shows a list page by page and lets the user move between pages.
+     * Every page is read again from the service, so the number of pages is
+     * updated after an addition or a deletion. Commands: {@code n} - next page,
+     * {@code p} - previous page, {@code g} - go to a page, {@code 0} - back to
+     * the menu. Going to a page after the last one shows an empty page.
+     * <p>
+     * The {@code while} loop reads commands from the keyboard; it does not
+     * traverse a collection.
+     *
+     * @param title     the title shown above every page
+     * @param loader    returns the page with the given number (starting from 0)
+     * @param formatter converts a user into the line shown on the page
+     */
+    private void browse(String title, IntFunction<Page<Utilizator>> loader,
+                        Function<Utilizator, String> formatter) {
+        int pageNumber = 0;
+        int lastShown = 0;
+        while (true) {
+            Page<Utilizator> page;
+            try {
+                page = loader.apply(pageNumber);
+            } catch (IllegalArgumentException e) {
+                System.out.println("Date invalide: " + e.getMessage());
+                pageNumber = lastShown;
+                continue;
+            }
+            lastShown = pageNumber;
+            long numberOfPages = page.getNumberOfPages(pageSize);
+            System.out.println(title);
+            if (page.getElementsOnPage().isEmpty()) {
+                System.out.println("  (pagina goala)");
+            }
+            page.getElementsOnPage().stream()
+                    .map(formatter)
+                    .map(line -> "  " + line)
+                    .forEach(System.out::println);
+            System.out.println("Pagina " + (pageNumber + 1) + " din " + numberOfPages
+                    + " (" + page.getTotalNumberOfElements() + " in total)");
+            String cmd = read("n - urmatoarea, p - anterioara, g - mergi la pagina, 0 - inapoi: ");
+            switch (cmd) {
+                case "n":
+                    if (pageNumber + 1 < numberOfPages) {
+                        pageNumber++;
+                    } else {
+                        System.out.println("Esti deja pe ultima pagina.");
+                    }
+                    break;
+                case "p":
+                    if (pageNumber > 0) {
+                        pageNumber--;
+                    } else {
+                        System.out.println("Esti deja pe prima pagina.");
+                    }
+                    break;
+                case "g":
+                    pageNumber = readPageNumber(pageNumber);
+                    break;
+                case "0":
+                    return;
+                default:
+                    System.out.println("Comanda necunoscuta.");
+            }
+        }
+    }
+
+    /**
+     * Reads the number of a page, as the user sees it (starting from 1).
+     *
+     * @param current the current page number, kept if the text is not a number
+     * @return the page number starting from 0 (it may be negative; the service
+     *         rejects it)
+     */
+    private int readPageNumber(int current) {
+        String text = read("Pagina: ");
+        try {
+            return Integer.parseInt(text) - 1;
+        } catch (NumberFormatException e) {
+            System.out.println("Eroare: numarul paginii trebuie sa fie un numar.");
+            return current;
+        }
+    }
+
+    /**
+     * Reads an id and shows the friends of that user: page by page if the
+     * persistence supports paging, otherwise the names on one line.
      */
     private void friendsOf() {
         Long id = readId("ID: ");
+        if (service.supportsPaging()) {
+            service.getUser(id);
+            browse("Prietenii lui " + id + ":", pageNumber -> service.getFriendsOnPage(id, pageNumber, pageSize),
+                    u -> u.getId() + " | " + u.getFirstName() + " " + u.getLastName());
+            return;
+        }
         String names = service.getFriendsOf(id).stream()
                 .map(u -> u.getFirstName() + " " + u.getLastName())
                 .collect(Collectors.joining(", "));

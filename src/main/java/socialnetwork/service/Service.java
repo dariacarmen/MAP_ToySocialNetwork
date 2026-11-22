@@ -6,6 +6,12 @@ import socialnetwork.domain.Utilizator;
 import socialnetwork.domain.validators.ValidationException;
 import socialnetwork.exceptions.RepositoryException;
 import socialnetwork.exceptions.ServiceException;
+
+import socialnetwork.repository.FriendshipPagingRepository;
+import socialnetwork.repository.PagingRepository;
+import socialnetwork.util.paging.Page;
+import socialnetwork.util.paging.Pageable;
+
 import socialnetwork.repository.Repository;
 
 import java.time.LocalDateTime;
@@ -196,6 +202,57 @@ public class Service {
                 .collect(Collectors.toList());
     }
 
+    // ---------------- Paging ----------------
+
+    /**
+     * Checks whether the lists of users and of friends can be read page by page.
+     *
+     * @return {@code true} if both repositories support paging (database)
+     */
+    public boolean supportsPaging() {
+        return userRepo instanceof PagingRepository && friendshipRepo instanceof FriendshipPagingRepository;
+    }
+
+    /**
+     * Returns one page of the users, ordered by id.
+     *
+     * @param pageNumber the number of the page, starting from 0
+     * @param pageSize   the maximum number of users on a page
+     * @return the users on the page and the number of all the users; a page
+     *         after the last one has no users
+     * @throws IllegalArgumentException if {@code pageNumber < 0} or {@code pageSize <= 0}
+     * @throws ServiceException         if the repository does not support paging
+     * @throws RepositoryException      if the users cannot be read
+     */
+    public Page<Utilizator> getUsersOnPage(int pageNumber, int pageSize) {
+        Pageable pageable = new Pageable(pageNumber, pageSize);
+        if (!(userRepo instanceof PagingRepository<Long, Utilizator> pagingRepo)) {
+            throw new ServiceException("Paginarea este disponibila doar pentru repository.type=DATABASE");
+        }
+        return pagingRepo.findAllOnPage(pageable);
+    }
+
+    /**
+     * Returns one page of the friends of a user, ordered by id.
+     *
+     * @param id         the id of the user
+     * @param pageNumber the number of the page, starting from 0
+     * @param pageSize   the maximum number of friends on a page
+     * @return the friends on the page and the number of all the friends of the
+     *         user; a page after the last one has no friends
+     * @throws IllegalArgumentException if {@code pageNumber < 0} or {@code pageSize <= 0}
+     * @throws ServiceException         if there is no user with this id, or the
+     *                                  repository does not support paging
+     * @throws RepositoryException      if the friends cannot be read
+     */
+    public Page<Utilizator> getFriendsOnPage(Long id, int pageNumber, int pageSize) {
+        Pageable pageable = new Pageable(pageNumber, pageSize);
+        if (!(friendshipRepo instanceof FriendshipPagingRepository pagingRepo)) {
+            throw new ServiceException("Paginarea este disponibila doar pentru repository.type=DATABASE");
+        }
+        getUser(id);
+        return pagingRepo.findFriendsOnPage(id, pageable);
+    }
     // ---------------- Friendships ----------------
 
     /**

@@ -167,7 +167,25 @@ public class RepositoryFactory {
     public RepositoryType getType() {
         return type;
     }
-
+    /**
+     * Reads the number of elements on a page from the {@code page.size} property.
+     *
+     * @return the page size, a positive number
+     * @throws RepositoryException if the property is missing, is not a number
+     *                             or is not positive
+     */
+    public int getPageSize() {
+        String value = getRequired("page.size");
+        try {
+            int size = Integer.parseInt(value);
+            if (size <= 0) {
+                throw new RepositoryException("page.size trebuie sa fie pozitiv, nu " + size);
+            }
+            return size;
+        } catch (NumberFormatException e) {
+            throw new RepositoryException("page.size trebuie sa fie un numar, nu '" + value + "'", e);
+        }
+    }
     /**
      * Creates the repository of users for the configured kind of persistence.
      *
